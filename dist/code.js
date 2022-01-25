@@ -4348,52 +4348,144 @@
   var SentimentAnalysis = require_lib();
   var sentiment = new SentimentAnalysis();
   var { currentPage, widget } = figma;
-  var { useSyncedMap, useSyncedState, AutoLayout, Text } = widget;
+  var { useEffect, useSyncedMap, useSyncedState, AutoLayout, Text } = widget;
   var isValidNonTextNode = (node) => node.type === "STICKY" || node.type === "SHAPE_WITH_TEXT";
   var isValidTextNode = (node) => node.type === "TEXT";
   var isValidNode = (node) => isValidNonTextNode(node) || isValidTextNode(node);
   function Sentiment() {
+    const [running, setRunning] = useSyncedState("running", false);
     const [score, setScore] = useSyncedState("score", 0);
-    const sentimentsMap = useSyncedMap("sentiments");
     const wordsMap = useSyncedMap("words");
-    const run = () => {
+    useEffect(() => {
+      figma.ui.onmessage = () => runSentimentAnalysisLoop();
+    });
+    const runSentimentAnalysis = (tryUsingSelection = false) => {
       wordsMap.keys().forEach((key) => wordsMap.delete(key));
       setScore(0);
-      const selected = currentPage.selection.filter(isValidNode);
+      const selected = tryUsingSelection ? currentPage.selection.filter(isValidNode) : [];
       const nodes = selected.length ? selected : currentPage.findAllWithCriteria({
         types: ["STICKY", "SHAPE_WITH_TEXT", "TEXT"]
       });
       let count = 0;
       let avg = 0;
       nodes.forEach((node) => {
-        const value = (isValidTextNode(node) ? node.characters : node.text.characters).toLowerCase().trim();
+        const chars = isValidTextNode(node) ? node.characters : node.text.characters;
+        const value = chars.toLowerCase().trim();
         if (value) {
           const result = sentiment.analyze(value);
-          const { words, score: score2 } = result;
-          if (words.length) {
-            console.log(result);
-            avg += score2;
-            count++;
-            words.forEach((word) => {
-              wordsMap.set(word, (wordsMap.get(word) || 0) + 1);
+          const { calculation } = result;
+          if (calculation.length) {
+            calculation.forEach((hash) => {
+              for (let word in hash) {
+                avg += hash[word] || 0;
+                count++;
+                wordsMap.set(word, (wordsMap.get(word) || 0) + 1);
+              }
             });
-            sentimentsMap.set(node.id, { words, score: score2 });
           }
         }
       });
-      setScore(avg / count);
+      const rawScore = avg / count / 5;
+      const posNeg = rawScore < 0 ? -1 : 1;
+      const adjustedScore = Math.pow(Math.abs(rawScore), 0.5) * posNeg;
+      const realScore = isNaN(adjustedScore) ? 0 : adjustedScore;
+      setScore(realScore);
+      console.log("Sentiment Data", {
+        score: realScore,
+        words: wordsMap.entries().sort((a, b) => b[1] - a[1])
+      });
     };
-    const sortedWords = wordsMap.entries().sort((a, b) => b[1] - a[1]).map(([word, instances]) => `${word} (${instances})`);
+    const runSentimentAnalysisLoop = () => {
+      runSentimentAnalysis();
+      if (running) {
+        setTimeout(() => {
+          figma.ui.postMessage("go");
+        }, 1e3);
+      }
+    };
+    const handleClick = () => {
+      if (running) {
+        setRunning(false);
+      } else {
+        setRunning(true);
+        setTimeout(() => {
+          figma.ui.postMessage("go");
+        }, 100);
+        return new Promise(() => figma.showUI(`<script>
+    window.onmessage = async (event) => {
+      parent.postMessage({ pluginMessage: "go" }, "*");
+    }
+    <\/script>`, { visible: false }));
+      }
+    };
+    const emojiSpectrum = ["\u{1F62D}", "\u{1F629}", "\u{1F623}", "\u{1F615}", "\u{1F610}", "\u{1F642}", "\u{1F60A}", "\u{1F601}", "\u{1F60D}"];
+    const emojiIndex = Math.floor(emojiSpectrum.length * ((score + 1) / 2));
+    const elementShadow = {
+      type: "drop-shadow",
+      blur: 2,
+      offset: { x: 0, y: 1 },
+      color: "#cdd3db"
+    };
     return /* @__PURE__ */ figma.widget.h(AutoLayout, {
+      cornerRadius: 8,
       direction: "vertical",
-      spacing: 8
+      effect: {
+        type: "drop-shadow",
+        blur: 4,
+        offset: { x: 0, y: 2 },
+        color: "#cdd3db"
+      },
+      fill: "#fff",
+      horizontalAlignItems: "center",
+      padding: 16,
+      spacing: 8,
+      stroke: "#f8f8f8",
+      strokeWidth: 1
     }, /* @__PURE__ */ figma.widget.h(AutoLayout, {
-      fill: "#000",
+      horizontalAlignItems: "center",
+      spacing: 4,
+      verticalAlignItems: "center"
+    }, emojiSpectrum.map((emoji, index) => /* @__PURE__ */ figma.widget.h(Text, {
+      key: emoji,
+      opacity: index === emojiIndex ? 1 : 0.4,
+      fontSize: index === emojiIndex ? 32 : 16
+    }, emoji))), /* @__PURE__ */ figma.widget.h(AutoLayout, {
+      direction: "horizontal",
+      spacing: 8,
+      width: "fill-parent"
+    }, /* @__PURE__ */ figma.widget.h(AutoLayout, {
+      cornerRadius: 30,
+      effect: elementShadow,
+      fill: running ? "#ff3b00" : "#222",
+      horizontalAlignItems: "center",
+      onClick: handleClick,
       padding: 8,
-      onClick: run
+      width: "fill-parent"
     }, /* @__PURE__ */ figma.widget.h(Text, {
-      fill: "#fff"
-    }, "Get Sentiment")), /* @__PURE__ */ figma.widget.h(Text, null, score.toFixed(1)), /* @__PURE__ */ figma.widget.h(Text, null, sortedWords.join("\n")));
+      fontWeight: "extra-bold",
+      fill: "#fff",
+      fontSize: 14
+    }, running ? "Stop" : "Start")), running ? null : /* @__PURE__ */ figma.widget.h(AutoLayout, {
+      cornerRadius: 30,
+      effect: elementShadow,
+      fill: "#222",
+      horizontalAlignItems: "center",
+      onClick: () => runSentimentAnalysis(true),
+      padding: 8,
+      width: "fill-parent"
+    }, /* @__PURE__ */ figma.widget.h(Text, {
+      fontWeight: "extra-bold",
+      fill: "#fff",
+      fontSize: 14
+    }, "Once"))), /* @__PURE__ */ figma.widget.h(AutoLayout, {
+      cornerRadius: 12,
+      fill: Math.abs(score) < 0.25 ? "#ffc500" : score > 0 ? "#00ad4d" : "#ff3b00",
+      padding: { top: 4, bottom: 4, left: 8, right: 8 }
+    }, /* @__PURE__ */ figma.widget.h(Text, {
+      fontWeight: "extra-bold",
+      fontSize: 12,
+      fill: "#FFF"
+    }, score.toFixed(3))));
   }
   widget.register(Sentiment);
 })();
