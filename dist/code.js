@@ -4349,6 +4349,61 @@
   var sentiment = new SentimentAnalysis();
   var { currentPage, widget } = figma;
   var { useEffect, useSyncedMap, useSyncedState, AutoLayout, Text } = widget;
+  function renderReport(words) {
+    return `
+    <style>
+      body {
+        box-sizing: border-box;
+        font-family: sans-serif;
+        margin: 0;
+        padding: 0rem;
+      }
+      table {
+        border-collapse: collapse;
+        font-size: 12px;
+        width: 100%;
+      }
+      tr:nth-child(even) td {
+        background: rgba(0,0,0,0.1);
+      }
+      th {
+        background: #222;
+      }
+      td, th {
+        color: white;
+        font-weight: bold;
+        padding: 0.25rem 0.5rem;
+        text-align: center;
+      }
+      td:first-child,
+      th:first-child {
+        text-align: left;
+        width: 100%;
+      }
+      td:last-child,
+      th:last-child {
+        text-align: right;
+        width: 100%;
+      }
+    </style>
+    <table>
+      <thead>
+        <tr>
+          <th>word</th>
+          <th>#</th>
+          <th>+/-</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${words.map(([word, { occurrences, score }]) => `<tr style="background-color: ${Math.abs(score) <= 1 ? "#ffc500" : score > 0 ? "#00ad4d" : "#ff3b00"}">
+            <td>${word}</td>
+            <td>${occurrences}</td>
+            <td>${score}</td>
+          </tr>`).join("\n")}
+      </tbody>
+    </table>
+  `;
+  }
   var isValidNonTextNode = (node) => node.type === "STICKY" || node.type === "SHAPE_WITH_TEXT";
   var isValidTextNode = (node) => node.type === "TEXT";
   var isValidNode = (node) => isValidNonTextNode(node) || isValidTextNode(node);
@@ -4359,6 +4414,10 @@
     useEffect(() => {
       figma.ui.onmessage = () => runSentimentAnalysisLoop();
     });
+    const showReport = () => {
+      const sortedWords = wordsMap.entries().sort((a, b) => b[1].occurrences - a[1].occurrences);
+      return new Promise(() => figma.showUI(renderReport(sortedWords)));
+    };
     const runSentimentAnalysis = (tryUsingSelection = false) => {
       wordsMap.keys().forEach((key) => wordsMap.delete(key));
       setScore(0);
@@ -4376,10 +4435,14 @@
           const { calculation } = result;
           if (calculation.length) {
             calculation.forEach((hash) => {
+              var _a;
               for (let word in hash) {
                 avg += hash[word] || 0;
                 count++;
-                wordsMap.set(word, (wordsMap.get(word) || 0) + 1);
+                wordsMap.set(word, {
+                  score: hash[word],
+                  occurrences: (((_a = wordsMap.get(word)) == null ? void 0 : _a.occurrences) || 0) + 1
+                });
               }
             });
           }
@@ -4390,9 +4453,10 @@
       const adjustedScore = Math.pow(Math.abs(rawScore), 0.5) * posNeg;
       const realScore = isNaN(adjustedScore) ? 0 : adjustedScore;
       setScore(realScore);
+      const sortedWords = wordsMap.entries().sort((a, b) => b[1].occurrences - a[1].occurrences);
       console.log("Sentiment Data", {
         score: realScore,
-        words: wordsMap.entries().sort((a, b) => b[1] - a[1])
+        words: sortedWords
       });
     };
     const runSentimentAnalysisLoop = () => {
@@ -4480,6 +4544,7 @@
     }, "Once"))), /* @__PURE__ */ figma.widget.h(AutoLayout, {
       cornerRadius: 12,
       fill: Math.abs(score) < 0.25 ? "#ffc500" : score > 0 ? "#00ad4d" : "#ff3b00",
+      onClick: running ? void 0 : showReport,
       padding: { top: 4, bottom: 4, left: 8, right: 8 }
     }, /* @__PURE__ */ figma.widget.h(Text, {
       fontWeight: "extra-bold",
