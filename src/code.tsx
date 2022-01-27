@@ -113,6 +113,7 @@ function Sentiment() {
         });
     let count = 0;
     let avg = 0;
+    const max = 4;
     nodes.forEach((node) => {
       const chars = isValidTextNode(node)
         ? node.characters
@@ -124,7 +125,7 @@ function Sentiment() {
         if (calculation.length) {
           calculation.forEach((hash: { [k: string]: number }) => {
             for (let word in hash) {
-              avg += hash[word] || 0;
+              avg += Math.min(max, Math.max(-max, hash[word] || 0));
               count++;
               wordsMap.set(word, {
                 score: hash[word],
@@ -135,16 +136,13 @@ function Sentiment() {
         }
       }
     });
-    const rawScore = avg / count / 5;
-    const posNeg = rawScore < 0 ? -1 : 1;
-    const adjustedScore = Math.pow(Math.abs(rawScore), 0.5) * posNeg;
-    const realScore = isNaN(adjustedScore) ? 0 : adjustedScore;
-    setScore(realScore);
+    const rawScore = avg / count / max;
+    setScore(rawScore);
     const sortedWords = wordsMap
       .entries()
       .sort((a, b) => b[1].occurrences - a[1].occurrences);
     console.log("Sentiment Data", {
-      score: realScore,
+      score: rawScore,
       words: sortedWords,
     });
   };
